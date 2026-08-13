@@ -5,36 +5,22 @@ on: workflow_dispatch
 jobs:
   rdp:
     runs-on: windows-latest
-
     steps:
-      - name: Install Tailscale using winget (official Microsoft package manager)
+      - name: Install Tailscale via winget
         run: |
           winget install Tailscale.Tailscale --silent --accept-package-agreements
-          # Refresh PATH so tailscale command is available immediately
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-
-      - name: Verify Tailscale installation
-        run: |
-          if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
-            Write-Error "Tailscale not found in PATH after installation."
-            exit 1
-          }
-          Write-Host "Tailscale installed successfully."
-
-      - name: Connect to Tailscale network
+      - name: Connect Tailscale
         run: |
           tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
-
-      - name: Get Tailscale IP
+      - name: Get IP
         run: |
           $ip = tailscale ip -4
-          Write-Host "Tailscale IPv4 Address: $ip"
-          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
-
-      - name: Set Windows password for RDP user
+          Write-Host "Tailscale IP: $ip"
+          echo "IP=$ip" >> $env:GITHUB_ENV
+      - name: Set RDP password
         run: |
           net user runneradmin MySecurePass@123
-
-      - name: Keep the runner alive (prevents session timeout)
+      - name: Keep alive
         run: |
           while ($true) { Start-Sleep -Seconds 3600 }
