@@ -6,22 +6,46 @@ jobs:
   rdp:
     runs-on: windows-latest
     steps:
-      - name: Install Tailscale via winget
+      - name: Download Tailscale MSI
         run: |
-          winget install Tailscale.Tailscale --silent --accept-package-agreements
-      - name: Wait for installation and set PATH
+          curl -L -o tailscale.msi https://pkgs.tailscale.com/stable/windows/tailscale-amd64-1.102.2.msi
+
+      - name: Install Tailscale with verification
         run: |
-          # Refresh PATH environment variable
+          $msi = "tailscale.msi"
+          $installResult = Start-Process -FilePath "msiexec" -ArgumentList "/i $msi /quiet /norestart" -Wait -PassThru
+          if ($installResult.ExitCode -ne 0 -and $installResult.ExitCode -ne 3010) {
+            Write-Error "MSI installation failed with exit code $($installResult.ExitCode)"
+            exit $installResult.ExitCode
+          }
+          Write-Host "MSI installation completed. Exit code: $($installResult.ExitCode)"
+          # Refresh PATH
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          # Verify EXE exists at standard path, if not try alternative
+          $exePath = "C:\Program Files\Tailscale\Tailscale.exe"
+          if (-not (Test-Path $exePath)) {
+            # Try Program Files (x86) just in case
+            $exePath = "C:\Program Files (x86)\Tailscale\Tailscale.exe"
+          }
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Tailscale.exe not found at any expected location."
+            exit 1
+          }
+          Write-Host "Tailscale.exe found at: $exePath"
+          echo "TAILSCALE_EXE=$exePath" >> $env:GITHUB_ENV
+
       - name: Connect Tailscale
         run: |
-          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+          & "$env:TAILSCALE_EXE" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+
       - name: Get IP
         run: |
-          tailscale ip -4
+          & "$env:TAILSCALE_EXE" ip -4
+
       - name: Set Windows Password
         run: |
           net user runneradmin MySecurePass@123
+
       - name: Keep Alive
         run: |
           while ($true) { Start-Sleep -Seconds 3600 }
