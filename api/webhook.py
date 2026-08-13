@@ -1,15 +1,20 @@
 import os
 import requests
 import json
+import time
+import zipfile
+import io
 from flask import Flask, request, Response
 import telebot
 
+# ---------- Environment ----------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO_OWNER = "G-Bot-Open"
 REPO_NAME = "G-bot-Rdp"
 WORKFLOW_ID = "rdp.yml"
 
+# ---------- Validation ----------
 if not TELEGRAM_TOKEN or ":" not in TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN missing or invalid")
 if not GITHUB_TOKEN:
@@ -18,7 +23,7 @@ if not GITHUB_TOKEN:
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
 
-# -------------------- GitHub API helpers --------------------
+# ---------- GitHub helpers ----------
 def trigger_workflow(password):
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{WORKFLOW_ID}/dispatches"
     headers = {"Accept": "application/vnd.github.v3+json", "Authorization": f"token {GITHUB_TOKEN}"}
@@ -27,7 +32,6 @@ def trigger_workflow(password):
     return r.status_code == 204
 
 def get_latest_ip():
-    import zipfile, io
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs?status=success&per_page=1"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     resp = requests.get(url, headers=headers).json()
@@ -50,7 +54,7 @@ def get_latest_ip():
                             return line.split("IP:")[-1].strip()
     return None
 
-# -------------------- Telegram Handlers --------------------
+# ---------- Telegram Handlers ----------
 @bot.message_handler(commands=['start', 'help'])
 def send_help(msg):
     bot.reply_to(msg, "🔥 RDP Bot\n/newrdp <pass> - create\n/status - check\n/stop - cancel")
@@ -66,7 +70,6 @@ def new_rdp(msg):
     if not trigger_workflow(password):
         bot.reply_to(msg, "❌ Workflow trigger failed.")
         return
-    import time
     time.sleep(60)
     ip = None
     for _ in range(10):
@@ -106,31 +109,35 @@ def stop(msg):
     else:
         bot.reply_to(msg, "❌ Cancel failed.")
 
-# -------------------- Webhook route --------------------
+# ---------- Webhook Endpoint ----------
 @app.route('/', methods=['GET'])
 def index():
     return "Bot is running on Vercel!"
 
 @app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
 def webhook():
-    json_str = request.get_data().decode('UTF-8')
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return Response('ok', status=200)
+    try:
+        json_str = request.get_data().decode('UTF-8')
+        update = telebot.types.Update.de_json(json_str)
+        bot.process_new_updates([update])
+        return Response('ok', status=200)
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return Response('error', status=500)
 
-# -------------------- Set webhook manually (called once at import) --------------------
+# ---------- Set webhook (will run at import) ----------
 def set_webhook():
     webhook_url = f"https://{os.getenv('VERCEL_URL', '')}/{TELEGRAM_TOKEN}"
     if not webhook_url.startswith("https://"):
         webhook_url = "https://" + webhook_url
     try:
         bot.remove_webhook()
-        bot.set_webhook(url=webhook_url)
-        print(f"Webhook set to {webhook_url}")
+        resp = bot.set_webhook(url=webhook_url)
+        print(f"Webhook set to {webhook_url} - result: {resp}")
     except Exception as e:
         print(f"Webhook set failed: {e}")
 
-# We call it only if VERCEL_URL is set (serverless environment)
+# Only run on serverless environment (not local)
 if os.getenv('VERCEL_URL'):
     set_webhook()
 else:
