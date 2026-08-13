@@ -1,45 +1,37 @@
-name: RDP with Tailscale
+name: Test Tailscale Installation
 
 on: workflow_dispatch
 
 jobs:
-  rdp:
+  test:
     runs-on: windows-latest
+
     steps:
-      - name: Download Tailscale EXE installer
+      - name: Install Tailscale
+        shell: powershell
         run: |
-          curl -L -o tailscale.exe https://pkgs.tailscale.com/stable/windows/tailscale-setup-1.102.2.exe
-          # Check file size - must be > 1MB
-          $size = (Get-Item tailscale.exe).Length
-          if ($size -lt 1000000) {
-            Write-Error "Downloaded file is too small ($size bytes) - likely an error page. Aborting."
+          winget install --id Tailscale.Tailscale `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
+
+      - name: Refresh PATH
+        shell: powershell
+        run: |
+          $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
+                      [Environment]::GetEnvironmentVariable("Path","User")
+
+      - name: Verify installation
+        shell: powershell
+        run: |
+          $cmd = Get-Command tailscale.exe -ErrorAction SilentlyContinue
+
+          if (-not $cmd) {
+            Write-Host "Tailscale was not found in PATH."
+            Get-ChildItem "C:\Program Files\Tailscale" -Filter "tailscale.exe" `
+              -ErrorAction SilentlyContinue
             exit 1
           }
-          Write-Host "Download successful, size: $size bytes"
 
-      - name: Install Tailscale silently
-        run: |
-          Start-Process -FilePath ".\tailscale.exe" -ArgumentList "/S" -Wait -PassThru
-          # Refresh PATH
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          # Verify installation
-          if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
-            Write-Error "tailscale command not found after installation."
-            exit 1
-          }
-
-      - name: Connect Tailscale
-        run: |
-          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
-
-      - name: Get IP
-        run: |
-          tailscale ip -4
-
-      - name: Set Windows Password
-        run: |
-          net user runneradmin MySecurePass@123
-
-      - name: Keep Alive
-        run: |
-          while ($true) { Start-Sleep -Seconds 3600 }
+          Write-Host "Tailscale found at: $($cmd.Source)"
+          tailscale version
