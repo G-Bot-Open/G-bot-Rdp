@@ -1,0 +1,75 @@
+name: Update RDP Status
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # every 5 minutes
+  workflow_dispatch:        # manual run
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # to push to docs/
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Get latest run status
+        id: status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Fetch latest workflow run for rdp.yml
+          RUN=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs?per_page=1&status=in_progress" | jq -r '.workflow_runs[0]')
+          if [ "$RUN" == "null" ]; then
+            echo "No in_progress run; checking completed runs"
+            RUN=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/$REPO/actions/runs?per_page=1&status=completed" | jq -r '.workflow_runs[0]')
+          fi
+          echo "RUN_INFO=$RUN" >> $GITHUB_ENV
+          echo "RUN_ID=$(echo $RUN | jq -r '.id')" >> $GITHUB_ENV
+          echo "RUN_STATUS=$(echo $RUN | jq -r '.status')" >> $GITHUB_ENV
+          echo "RUN_CONCLUSION=$(echo $RUN | jq -r '.conclusion')" >> $GITHUB_ENV
+
+      - name: Extract IP and write JSON
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ env.RUN_ID }}
+        run: |
+          # If no run, set empty
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "null" ]; then
+            echo '{"ip": null, "status": "idle", "updated": "'$(date -Iseconds)'"}' > docs/ip.json
+            exit 0
+          fi
+
+          # Fetch logs for that run
+          LOGS_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/logs"
+          curl -L -H "Authorization: token $GITHUB_TOKEN" -o logs.zip "$LOGS_URL"
+          unzip -p logs.zip *.txt | grep -Eo "IP Address: [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" > ip.txt
+          IP=$(cat ip.txt | head -1 | cut -d' ' -f3)
+          if [ -z "$IP" ]; then
+            IP="null"
+          fi
+
+          STATUS="${{ env.RUN_STATUS }}"
+          if [ "${{ env.RUN_CONCLUSION }}" == "success" ]; then
+            STATUS="active"
+          elif [ "${{ env.RUN_CONCLUSION }}" == "cancelled" ] || [ "${{ env.RUN_CONCLUSION }}" == "failure" ]; then
+            STATUS="expired"
+          elif [ "$STATUS" == "in_progress" ]; then
+            STATUS="starting"
+          else
+            STATUS="unknown"
+          fi
+
+          echo "{\"ip\": $IP, \"status\": \"$STATUS\", \"updated\": \"$(date -Iseconds)\"}" > docs/ip.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ip.json
+          git diff --staged --quiet || git commit -m "Update RDP status [skip ci]"
+          git push
