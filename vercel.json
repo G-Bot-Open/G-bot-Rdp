@@ -1,19 +1,9 @@
 {
   "version": 2,
   "builds": [
-    {
-      "src": "api/webhook.py",
-      "use": "@vercel/python"
-    }
+    { "src": "api/webhook.py", "use": "@vercel/python" }
   ],
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "api/webhook.py"
-    }
-  ],
-  "env": {
-    "TELEGRAM_TOKEN": "@telegram_token",
-    "GITHUB_TOKEN": "@github_token"
-  }
+    { "src": "/(.*)", "dest": "api/webhook.py" }
+  ]
 }
