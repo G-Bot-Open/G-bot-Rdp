@@ -1,0 +1,23 @@
+name: RDP with Tailscale
+
+on: workflow_dispatch
+
+jobs:
+  rdp:
+    runs-on: windows-latest
+    steps:
+      - name: Install Tailscale
+        run: |
+          iex (irm https://tailscale.com/install.ps1)
+      - name: Connect Tailscale
+        run: |
+          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+      - name: Get IP
+        run: |
+          tailscale ip -4
+      - name: Set Windows Password
+        run: |
+          net user runneradmin MySecurePass@123
+      - name: Keep Alive
+        run: |
+          while ($true) { Start-Sleep -Seconds 3600 }
