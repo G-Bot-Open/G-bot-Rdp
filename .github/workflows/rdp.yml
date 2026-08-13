@@ -1,12 +1,6 @@
 name: RDP with Tailscale
 
-on:
-  workflow_dispatch:
-    inputs:
-      password:
-        description: 'RDP Password'
-        required: true
-        default: 'MySecurePass@123'
+on: workflow_dispatch
 
 jobs:
   rdp:
@@ -20,27 +14,24 @@ jobs:
         with:
           authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
 
-      - name: Enable RDP and Set Custom Password
+      - name: Enable RDP and Set Password
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          net user runneradmin "${{ github.event.inputs.password }}"
+          net user runneradmin MySecurePass@123
 
       - name: Get Tailscale IP
         run: |
           $ip = (tailscale ip -4).Trim()
-          Write-Host "IP=$ip" >> $env:GITHUB_ENV
-          echo "IP=$ip"
-
-      - name: Display Connection Details
-        run: |
           Write-Host "================================================"
           Write-Host "✅ RDP IS READY"
-          Write-Host "🌐 IP: $env:IP"
-          Write-Host "👤 User: runneradmin"
-          Write-Host "🔑 Pass: ${{ github.event.inputs.password }}"
+          Write-Host "🌐 IP Address: $ip"
+          Write-Host "👤 Username  : runneradmin"
+          Write-Host "🔑 Password  : MySecurePass@123"
+          Write-Host "⏳ Session active for ~6 hours."
           Write-Host "================================================"
+          echo "IP=$ip" >> $env:GITHUB_ENV
 
-      - name: Keep Alive
+      - name: Keep Alive (DO NOT CANCEL)
         run: |
           while ($true) { Start-Sleep -Seconds 3600 }
