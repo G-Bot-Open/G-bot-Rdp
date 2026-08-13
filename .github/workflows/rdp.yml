@@ -6,16 +6,15 @@ jobs:
   rdp:
     runs-on: windows-latest
     steps:
-      - name: Install Tailscale
+      - name: Install Tailscale (official script)
         run: |
-          curl -L -o tailscale.exe https://pkgs.tailscale.com/stable/windows/tailscale-setup-1.76.6.exe
-          ./tailscale.exe /S
+          Invoke-Expression (Invoke-WebRequest -Uri "https://tailscale.com/install.ps1" -UseBasicParsing).Content
       - name: Connect Tailscale
         run: |
-          & "C:\Program Files\Tailscale\Tailscale.exe" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
       - name: Get IP
         run: |
-          & "C:\Program Files\Tailscale\Tailscale.exe" ip -4
+          tailscale ip -4
       - name: Set Windows Password
         run: |
           net user runneradmin MySecurePass@123
