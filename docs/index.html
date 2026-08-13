@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>RDP Dashboard</title>
+    <meta http-equiv="refresh" content="30">
+    <style>
+        body { font-family: Arial, sans-serif; background: #0d1117; color: #c9d1d9; padding: 30px; }
+        .container { max-width: 600px; margin: auto; background: #161b22; padding: 30px; border-radius: 12px; text-align: center; }
+        .ip { font-size: 2.5rem; font-weight: bold; color: #3fb950; }
+        .status { font-size: 1.2rem; margin: 10px 0; }
+        .active { color: #3fb950; }
+        .starting { color: #d29922; }
+        .expired { color: #f85149; }
+        .idle { color: #8b949e; }
+        .btn { background: #238636; border: none; color: white; padding: 12px 24px; border-radius: 6px; font-size: 1rem; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 15px; }
+        .btn:hover { background: #2ea043; }
+        .footer { margin-top: 20px; font-size: 0.8rem; color: #8b949e; }
+        .info { text-align: left; margin: 15px 0; }
+        .info-label { color: #8b949e; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖥️ RDP Control Panel</h1>
+        <div class="info">
+            <div class="info-label">🌐 IP Address</div>
+            <div class="ip" id="ip-display">Loading...</div>
+            <div class="info-label">👤 Username</div>
+            <div><strong>runneradmin</strong></div>
+            <div class="info-label">🔑 Password</div>
+            <div><strong>MySecurePass@123</strong></div>
+            <div class="info-label">⏳ Status</div>
+            <div class="status" id="status-display">Loading...</div>
+            <div class="info-label">🕒 Last Updated</div>
+            <div id="updated-display">--</div>
+        </div>
+        <a href="https://github.com/G-Bot-Open/G-bot-Rdp/actions/workflows/rdp.yml" target="_blank" class="btn">🔄 Trigger New RDP (GitHub)</a>
+        <div class="footer">Page auto‑refreshes every 30 seconds<br>Session auto‑renews when expired</div>
+    </div>
+    <script>
+        async function fetchStatus() {
+            try {
+                const res = await fetch('ip.json?t=' + Date.now());
+                const data = await res.json();
+                document.getElementById('ip-display').textContent = data.ip || 'No active session';
+                const statusEl = document.getElementById('status-display');
+                const statusText = data.status || 'idle';
+                statusEl.textContent = statusText.charAt(0).toUpperCase() + statusText.slice(1);
+                statusEl.className = 'status ' + statusText;
+                document.getElementById('updated-display').textContent = data.updated ? new Date(data.updated).toLocaleString() : '--';
+            } catch (e) {
+                document.getElementById('ip-display').textContent = '⚠️ Error fetching data';
+            }
+        }
+        fetchStatus();
+        setInterval(fetchStatus, 30000);
+    </script>
+</body>
+</html>
