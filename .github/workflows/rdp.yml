@@ -9,27 +9,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Tailscale
+      - name: Tailscale Connect
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTH_KEY }}
 
-      - name: Get IP and Set Password
+      - name: Enable RDP and Set Password
+        run: |
+          # Windows Registry mein RDP Enable karo
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          # Firewall mein RDP Allow karo
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          # Password set karo
+          net user runneradmin MySecurePass@123
+
+      - name: Get Tailscale IP
         run: |
           $ip = (tailscale ip -4).Trim()
           Write-Host "Tailscale IP: $ip"
           echo "IP=$ip" >> $env:GITHUB_ENV
-          net user runneradmin MySecurePass@123
 
       - name: Display Connection Details
         run: |
           Write-Host "================================================"
-          Write-Host "RDP IS READY"
-          Write-Host "IP Address: $env:IP"
-          Write-Host "Username  : runneradmin"
-          Write-Host "Password  : MySecurePass@123"
+          Write-Host "✅ RDP IS READY"
+          Write-Host "🌐 IP Address: $env:IP"
+          Write-Host "👤 Username  : runneradmin"
+          Write-Host "🔑 Password  : MySecurePass@123"
+          Write-Host "⏳ Keep-Alive Active... DO NOT CANCEL WORKFLOW!"
           Write-Host "================================================"
 
-      - name: Keep Alive
+      - name: Keep Alive (DO NOT CANCEL THIS JOB)
         run: |
+          # Agar workflow cancel hua toh VM band ho jayega.
+          # Ise chalta rehne do, RDP connected rahega.
           while ($true) { Start-Sleep -Seconds 3600 }
