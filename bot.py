@@ -1,16 +1,29 @@
-import telebot
-import requests
-import json
+import os
 import time
 import threading
-from flask import Flask, request
+import zipfile
+import io
+import requests
+import telebot
+from flask import Flask
+
+# ===== DEBUG: Check if env vars are set =====
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+print(f"TELEGRAM_TOKEN = {TELEGRAM_TOKEN}")
+print(f"GITHUB_TOKEN (first 10 chars) = {GITHUB_TOKEN[:10] if GITHUB_TOKEN else 'None'}")
+
+if not TELEGRAM_TOKEN or ":" not in TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN is missing or invalid (must contain a colon)")
+
+if not GITHUB_TOKEN:
+    raise ValueError("❌ GITHUB_TOKEN is missing")
 
 # ===== CONFIG =====
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"   # Replace
-GITHUB_TOKEN = "YOUR_GITHUB_PAT"             # Replace
 REPO_OWNER = "G-Bot-Open"
 REPO_NAME = "G-bot-Rdp"
-WORKFLOW_ID = "rdp.yml"  # or use filename
+WORKFLOW_ID = "rdp.yml"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
@@ -29,56 +42,118 @@ def trigger_workflow(password):
             "password": password
         }
     }
-    response = requests.post(url, headers=headers, json=payload)
-    return response.status_code == 204
+    r = requests.post(url, headers=headers, json=payload)
+    return r.status_code == 204
 
-def get_latest_run_id():
-    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs?status=in_progress&per_page=1"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    resp = requests.get(url, headers=headers).json()
-    if resp["total_count"] > 0:
-        return resp["workflow_runs"][0]["id"]
-    return None
-
-def get_run_logs(run_id):
-    # Fetch the log output (we can fetch the raw logs via API)
-    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs/{run_id}/logs"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    resp = requests.get(url, headers=headers, allow_redirects=True)
-    # We need to parse the zip? Actually we can get the job steps via API
-    # Simpler: use the "Display Connection Details" step output from logs.
-    # We'll instead fetch the run details and find the IP from the job steps.
-    # But easier: we can use the "Get Tailscale IP" step which writes to stdout.
-    # We'll use the logs API to get the entire log and grep.
-    if resp.status_code == 200:
-        # The logs are in a zip; we need to extract or we can use the job steps API.
-        # Let's use the jobs API to get step outputs (not available directly).
-        # Alternative: We can let the bot wait for a fixed time and then query the run status.
-        pass
-    return None
-
-# We'll implement a polling mechanism: trigger workflow, wait for completion, then fetch IP from the run.
-
-def get_latest_successful_run_ip():
+def get_latest_ip():
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs?status=success&per_page=1"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     resp = requests.get(url, headers=headers).json()
-    if resp["total_count"] == 0:
+    if resp.get("total_count", 0) == 0:
         return None
     run = resp["workflow_runs"][0]
-    # Get jobs for this run
-    jobs_url = run["jobs_url"]
-    jobs_resp = requests.get(jobs_url, headers=headers).json()
-    # Find step output from "Get Tailscale IP" step
-    for job in jobs_resp["jobs"]:
-        for step in job["steps"]:
-            if step["name"] == "Get Tailscale IP" and step["status"] == "completed":
-                # The output is in the logs; we can use the run logs URL
-                # Let's fetch the logs for this job
-                log_url = step["logs_url"]  # actually this might not exist
-                # Simpler: we can parse the workflow run's annotations or use the "Display Connection Details" step
-                pass
-    # We'll use a hack: when the workflow runs, it prints the IP in the logs.
+    logs_url = run.get("logs_url")
+    if not logs_url:
+        return None
+    logs_resp = requests.get(logs_url, headers=headers, allow_redirects=True)
+    if logs_resp.status_code != 200:
+        return None
+    with zipfile.ZipFile(io.BytesIO(logs_resp.content)) as z:
+        for fname in z.namelist():
+            if fname.endswith(".txt"):
+                with z.open(fname) as f:
+                    content = f.read().decode('utf-8', errors='ignore')
+                    for line in content.split('\n'):
+                        if "IP: " in line and "100." in line:
+                            return line.split("IP:")[-1].strip()
+    return None
+
+# ===== TELEGRAM COMMANDS =====
+
+@bot.message_handler(commands=['start', 'help'])
+def send_help(msg):
+    bot.reply_to(msg, 
+        "🔥 Welcome to RDP Bot!\n\n"
+        "/newrdp <password> - Create new RDP session\n"
+        "/status - Check active workflow\n"
+        "/stop - Cancel current session\n"
+        "/help - Show this"
+    )
+
+@bot.message_handler(commands=['newrdp'])
+def new_rdp(msg):
+    parts = msg.text.split()
+    if len(parts) < 2:
+        bot.reply_to(msg, "❌ Usage: /newrdp <password>")
+        return
+    password = parts[1]
+    bot.reply_to(msg, "⏳ Creating RDP session... please wait 1-2 minutes.")
+    
+    if not trigger_workflow(password):
+        bot.reply_to(msg, "❌ Failed to trigger workflow. Check GitHub token.")
+        return
+
+    time.sleep(60)  # wait for runner to start
+    ip = None
+    for _ in range(10):  # max 100 seconds
+        ip = get_latest_ip()
+        if ip:
+            break
+        time.sleep(10)
+    
+    if ip:
+        reply = (
+            f"✅ RDP Ready!\n\n"
+            f"🌐 IP: {ip}\n"
+            f"👤 Username: runneradmin\n"
+            f"🔑 Password: {password}\n\n"
+            f"⏳ Active for ~6 hours.\n"
+            f"❌ Use /stop to cancel."
+        )
+        bot.reply_to(msg, reply)
+    else:
+        bot.reply_to(msg, "❌ Could not fetch IP. Check GitHub Actions logs.")
+
+@bot.message_handler(commands=['status'])
+def status(msg):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs?per_page=1"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.get(url, headers=headers).json()
+    if r.get("total_count", 0) == 0:
+        bot.reply_to(msg, "❌ No workflow runs found.")
+        return
+    run = r["workflow_runs"][0]
+    status_text = f"Run #{run['id']}\nStatus: {run['status']} {run.get('conclusion', '')}\n{run['html_url']}"
+    bot.reply_to(msg, status_text)
+
+@bot.message_handler(commands=['stop'])
+def stop(msg):
+    url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs?status=in_progress&per_page=1"
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    r = requests.get(url, headers=headers).json()
+    if r.get("total_count", 0) == 0:
+        bot.reply_to(msg, "❌ No active workflow to cancel.")
+        return
+    run_id = r["workflow_runs"][0]["id"]
+    cancel_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/runs/{run_id}/cancel"
+    resp = requests.post(cancel_url, headers=headers)
+    if resp.status_code == 202:
+        bot.reply_to(msg, f"✅ Workflow #{run_id} cancelled. VM will terminate shortly.")
+    else:
+        bot.reply_to(msg, "❌ Failed to cancel workflow.")
+
+# ===== FLASK KEEP-ALIVE =====
+
+@app.route('/')
+def index():
+    return "Bot is running!"
+
+# ===== MAIN =====
+if __name__ == "__main__":
+    # Start bot polling in background thread
+    threading.Thread(target=bot.polling, kwargs={'none_stop': True, 'interval': 1}).start()
+    # Run Flask server
+    app.run(host='0.0.0.0', port=8080)    # We'll use a hack: when the workflow runs, it prints the IP in the logs.
     # So we can fetch the logs archive and extract the IP.
     logs_url = run["logs_url"]
     logs_resp = requests.get(logs_url, headers=headers, allow_redirects=True)
