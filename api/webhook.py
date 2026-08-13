@@ -4,17 +4,21 @@ import json
 from flask import Flask, request, Response
 import telebot
 
-# ===== TOKENS (Vercel Env se) =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO_OWNER = "G-Bot-Open"
 REPO_NAME = "G-bot-Rdp"
 WORKFLOW_ID = "rdp.yml"
 
+if not TELEGRAM_TOKEN or ":" not in TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN missing or invalid")
+if not GITHUB_TOKEN:
+    raise ValueError("GITHUB_TOKEN missing")
+
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
 
-# ===== GITHUB FUNCTIONS (same as before) =====
+# -------------------- GitHub API helpers --------------------
 def trigger_workflow(password):
     url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/actions/workflows/{WORKFLOW_ID}/dispatches"
     headers = {"Accept": "application/vnd.github.v3+json", "Authorization": f"token {GITHUB_TOKEN}"}
@@ -46,7 +50,7 @@ def get_latest_ip():
                             return line.split("IP:")[-1].strip()
     return None
 
-# ===== TELEGRAM HANDLERS =====
+# -------------------- Telegram Handlers --------------------
 @bot.message_handler(commands=['start', 'help'])
 def send_help(msg):
     bot.reply_to(msg, "🔥 RDP Bot\n/newrdp <pass> - create\n/status - check\n/stop - cancel")
@@ -102,7 +106,7 @@ def stop(msg):
     else:
         bot.reply_to(msg, "❌ Cancel failed.")
 
-# ===== WEBHOOK ROUTE =====
+# -------------------- Webhook route --------------------
 @app.route('/', methods=['GET'])
 def index():
     return "Bot is running on Vercel!"
@@ -114,12 +118,20 @@ def webhook():
     bot.process_new_updates([update])
     return Response('ok', status=200)
 
-# ===== SET WEBHOOK ON STARTUP (only once) =====
+# -------------------- Set webhook manually (called once at import) --------------------
 def set_webhook():
-    webhook_url = f"https://{os.getenv('VERCEL_URL')}/{TELEGRAM_TOKEN}"
-    bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
-    print(f"Webhook set to {webhook_url}")
+    webhook_url = f"https://{os.getenv('VERCEL_URL', '')}/{TELEGRAM_TOKEN}"
+    if not webhook_url.startswith("https://"):
+        webhook_url = "https://" + webhook_url
+    try:
+        bot.remove_webhook()
+        bot.set_webhook(url=webhook_url)
+        print(f"Webhook set to {webhook_url}")
+    except Exception as e:
+        print(f"Webhook set failed: {e}")
 
-# Vercel serverless function entry point
-app.before_first_request(set_webhook)
+# We call it only if VERCEL_URL is set (serverless environment)
+if os.getenv('VERCEL_URL'):
+    set_webhook()
+else:
+    print("No VERCEL_URL, skipping webhook setup")
