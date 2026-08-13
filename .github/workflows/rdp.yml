@@ -6,12 +6,10 @@ jobs:
   rdp:
     runs-on: windows-latest
     steps:
-      - name: Download Tailscale
+      - name: Install Tailscale
         run: |
-          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/windows/tailscale-setup-1.76.6.exe" -OutFile "$env:TEMP\tailscale.exe"
-      - name: Install Tailscale silently
-        run: |
-          Start-Process -FilePath "$env:TEMP\tailscale.exe" -ArgumentList "/S" -Wait
+          curl -L -o tailscale.exe https://pkgs.tailscale.com/stable/windows/tailscale-setup-1.76.6.exe
+          ./tailscale.exe /S
       - name: Connect Tailscale
         run: |
           & "C:\Program Files\Tailscale\Tailscale.exe" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
