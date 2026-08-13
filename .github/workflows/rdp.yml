@@ -6,41 +6,35 @@ jobs:
   rdp:
     runs-on: windows-latest
     steps:
-      - name: Download Tailscale MSI
+      - name: Download Tailscale EXE installer
         run: |
-          curl -L -o tailscale.msi https://pkgs.tailscale.com/stable/windows/tailscale-amd64-1.102.2.msi
-
-      - name: Install Tailscale with verification
-        run: |
-          $msi = "tailscale.msi"
-          $installResult = Start-Process -FilePath "msiexec" -ArgumentList "/i $msi /quiet /norestart" -Wait -PassThru
-          if ($installResult.ExitCode -ne 0 -and $installResult.ExitCode -ne 3010) {
-            Write-Error "MSI installation failed with exit code $($installResult.ExitCode)"
-            exit $installResult.ExitCode
-          }
-          Write-Host "MSI installation completed. Exit code: $($installResult.ExitCode)"
-          # Refresh PATH
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          # Verify EXE exists at standard path, if not try alternative
-          $exePath = "C:\Program Files\Tailscale\Tailscale.exe"
-          if (-not (Test-Path $exePath)) {
-            # Try Program Files (x86) just in case
-            $exePath = "C:\Program Files (x86)\Tailscale\Tailscale.exe"
-          }
-          if (-not (Test-Path $exePath)) {
-            Write-Error "Tailscale.exe not found at any expected location."
+          curl -L -o tailscale.exe https://pkgs.tailscale.com/stable/windows/tailscale-setup-1.102.2.exe
+          # Check file size - must be > 1MB
+          $size = (Get-Item tailscale.exe).Length
+          if ($size -lt 1000000) {
+            Write-Error "Downloaded file is too small ($size bytes) - likely an error page. Aborting."
             exit 1
           }
-          Write-Host "Tailscale.exe found at: $exePath"
-          echo "TAILSCALE_EXE=$exePath" >> $env:GITHUB_ENV
+          Write-Host "Download successful, size: $size bytes"
+
+      - name: Install Tailscale silently
+        run: |
+          Start-Process -FilePath ".\tailscale.exe" -ArgumentList "/S" -Wait -PassThru
+          # Refresh PATH
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          # Verify installation
+          if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
+            Write-Error "tailscale command not found after installation."
+            exit 1
+          }
 
       - name: Connect Tailscale
         run: |
-          & "$env:TAILSCALE_EXE" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
 
       - name: Get IP
         run: |
-          & "$env:TAILSCALE_EXE" ip -4
+          tailscale ip -4
 
       - name: Set Windows Password
         run: |
