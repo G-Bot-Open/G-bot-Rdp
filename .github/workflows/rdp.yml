@@ -1,37 +1,40 @@
-name: Test Tailscale Installation
+name: RDP with Tailscale
 
 on: workflow_dispatch
 
 jobs:
-  test:
+  rdp:
     runs-on: windows-latest
 
     steps:
-      - name: Install Tailscale
-        shell: powershell
+      - name: Install Tailscale using winget (official Microsoft package manager)
         run: |
-          winget install --id Tailscale.Tailscale `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
+          winget install Tailscale.Tailscale --silent --accept-package-agreements
+          # Refresh PATH so tailscale command is available immediately
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
-      - name: Refresh PATH
-        shell: powershell
+      - name: Verify Tailscale installation
         run: |
-          $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                      [Environment]::GetEnvironmentVariable("Path","User")
-
-      - name: Verify installation
-        shell: powershell
-        run: |
-          $cmd = Get-Command tailscale.exe -ErrorAction SilentlyContinue
-
-          if (-not $cmd) {
-            Write-Host "Tailscale was not found in PATH."
-            Get-ChildItem "C:\Program Files\Tailscale" -Filter "tailscale.exe" `
-              -ErrorAction SilentlyContinue
+          if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {
+            Write-Error "Tailscale not found in PATH after installation."
             exit 1
           }
+          Write-Host "Tailscale installed successfully."
 
-          Write-Host "Tailscale found at: $($cmd.Source)"
-          tailscale version
+      - name: Connect to Tailscale network
+        run: |
+          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+
+      - name: Get Tailscale IP
+        run: |
+          $ip = tailscale ip -4
+          Write-Host "Tailscale IPv4 Address: $ip"
+          echo "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Set Windows password for RDP user
+        run: |
+          net user runneradmin MySecurePass@123
+
+      - name: Keep the runner alive (prevents session timeout)
+        run: |
+          while ($true) { Start-Sleep -Seconds 3600 }
