@@ -6,15 +6,18 @@ jobs:
   rdp:
     runs-on: windows-latest
     steps:
-      - name: Install Tailscale (official script)
+      - name: Download Tailscale MSI
         run: |
-          Invoke-Expression (Invoke-WebRequest -Uri "https://tailscale.com/install.ps1" -UseBasicParsing).Content
+          curl -L -o tailscale.msi https://pkgs.tailscale.com/stable/windows/tailscale-amd64-1.102.2.msi
+      - name: Install Tailscale
+        run: |
+          msiexec /i tailscale.msi /quiet /norestart
       - name: Connect Tailscale
         run: |
-          tailscale up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
+          & "C:\Program Files\Tailscale\Tailscale.exe" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }}
       - name: Get IP
         run: |
-          tailscale ip -4
+          & "C:\Program Files\Tailscale\Tailscale.exe" ip -4
       - name: Set Windows Password
         run: |
           net user runneradmin MySecurePass@123
